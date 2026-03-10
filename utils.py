@@ -18,7 +18,27 @@ def clean(text):
     text = re.sub(r'http\S+', '', text) # remove URLs
     # text = re.sub(r'[^a-z0-9\s?.!,]', '', text) # retain specific punctuation (perhaps a bit too destructive)
     text = re.sub(r'\s+', ' ', text) # format whitespace
+    text = re.sub(r'<.*?>', '', text)      # remove IRC usernames
+    text = re.sub(r'\S+/\S+', '', text)    # remove file paths
+    text = re.sub(r'\d+', '', text)        # remove isolated numbers
     return text.strip()
+
+def remove_noise(text):
+    """
+    Removing duplicates / non-conversational messages.
+    """
+    text = text.strip()
+
+    if len(text) < 2:
+        return False
+    if text.startswith('!'):   # shell commands
+        return False
+    if text.startswith('/'):   # IRC commands
+        return False
+    if text.startswith('http'):
+        return False
+
+    return True
 
 def tokenise(text):
     """
@@ -36,6 +56,7 @@ def encode_sequence(text, vocab, max_len):
     vals = vals + [vocab['<PAD>']] * remaining # Pad to the max length
     
     return vals
+
 
 
 # == Dataset ==
