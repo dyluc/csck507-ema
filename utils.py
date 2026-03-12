@@ -20,7 +20,7 @@ def clean(text):
     text = re.sub(r'\s+', ' ', text) # format whitespace
     text = re.sub(r'<.*?>', '', text)      # remove IRC usernames
     text = re.sub(r'\S+/\S+', '', text)    # remove file paths
-    text = re.sub(r'\d+', '', text)        # remove isolated numbers
+    # text = re.sub(r'\d+', '', text)        # remove isolated numbers
     return text.strip()
 
 def remove_noise(text):
