@@ -109,7 +109,8 @@ def load_sets():
     return train_set, val_set, test_set
 
 def load_vocab(rev=False):
-    with open(f'{PREPROCESSED_DIR}/{'vocab_reversed' if rev else 'vocab'}.json', 'r') as f:
+    filename = 'vocab_reversed' if rev else 'vocab'
+    with open(f'{PREPROCESSED_DIR}/{filename}.json', 'r') as f:
         return json.load(f)
 
 def load_config():
