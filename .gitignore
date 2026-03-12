@@ -13,3 +13,7 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Local trained embedding models
+models/*.model
+models/*.npy
