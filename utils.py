@@ -14,13 +14,19 @@ def clean(text):
     """
     Clean and format text.
     """
-    text = text.lower() # lowercase (normalise vocabulary size)
-    text = re.sub(r'http\S+', '', text) # remove URLs
-    # text = re.sub(r'[^a-z0-9\s?.!,]', '', text) # retain specific punctuation (perhaps a bit too destructive)
-    text = re.sub(r'\s+', ' ', text) # format whitespace
-    text = re.sub(r'<.*?>', '', text)      # remove IRC usernames
-    text = re.sub(r'\S+/\S+', '', text)    # remove file paths
-    # text = re.sub(r'\d+', '', text)        # remove isolated numbers
+    # Extract special tokens before lowercasing
+    special_tokens = re.findall(r'<[A-Z0-9]+>', text)
+    # ['<PAD>', '<SOS>', '<EOS>', '<UNK>', '<SEP>', '<S0>', '<S1>']
+    
+    text = text.lower()
+    text = re.sub(r'http\S+', '', text) # URLs
+    text = re.sub(r'\s+', ' ', text) # Whitespace
+    text = re.sub(r'\S+/\S+', '', text) # Filepaths
+    
+    # Restore special tokens to uppercase
+    for token in special_tokens:
+        text = text.replace(token.lower(), token)
+    
     return text.strip()
 
 def remove_noise(text):
