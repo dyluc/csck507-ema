@@ -5,3 +5,4 @@ kaggle
 pandas
 matplotlib
 scikit-learn
+sentencepiece
