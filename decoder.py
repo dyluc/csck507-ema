@@ -39,8 +39,8 @@ class Decoder(nn.Module):
 
             # Compute attention scores between the decoder state and every encoder timestep
             attn_scores = torch.bmm(
-                output,
-                encoder_outputs.transpose(1, 2)
+                output, 
+                self.attn(encoder_outputs).transpose(1, 2)
             )
             # Convert raw attention scores into probabilities
             attn_weights = torch.softmax(attn_scores, dim=-1) # Softmax ensures the weights sum to 1 across the encoder sequence
