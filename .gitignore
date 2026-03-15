@@ -17,3 +17,4 @@ __pycache__/
 # Local trained embedding models
 models/*.model
 models/*.npy
+data/
