@@ -3,6 +3,9 @@ import pandas as pd
 import json
 import torch
 from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import sentencepiece as spm
+
 
 """
 Utility functions used both within the data preprocessing pipeline, and other notebooks prior to model experimentation.
@@ -46,11 +49,34 @@ def remove_noise(text):
 
     return True
 
-def tokenise(text):
+#def tokenise(text):
     """
     Split on whitespace.
     """
+#    return text.split()
+
+
+# Setting up Byte Pair Encoding (BPE) for tokenisation
+# A file will store the rules learned by the tokeniser for splitting text into subword tokens
+BPE_MODEL_PATH = "./data/preprocessed/bpe.model"
+
+sp = None
+if Path(BPE_MODEL_PATH).exists():
+    sp = spm.SentencePieceProcessor()
+    sp.load(BPE_MODEL_PATH)
+
+# This will be our way of accessing the learnt rules above inside the preprocessing pipeline
+def tokenise(text):
+   # return text.split() # Original tokenisation function
+    """
+    Tokenising text with BPE if available, otherwise falling back to whitespace.
+    """
+    if sp is not None:
+        return sp.encode(text, out_type=str)
+
     return text.split()
+
+
 
 def encode_sequence(text, vocab, max_len):
     """
