@@ -5,7 +5,6 @@ class Decoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, padding_idx, hidden_dim, num_layers, dropout_proba, use_attention=False):
         super().__init__()
         self.use_attention = use_attention
-        self
         self.embedding = nn.Embedding(
             vocab_size, embed_dim, padding_idx=padding_idx
         )
