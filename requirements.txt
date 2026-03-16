@@ -5,4 +5,5 @@ kaggle
 pandas
 matplotlib
 scikit-learn
+nltk
 sentencepiece
