@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 from bleu import compute_bleu
 
-def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion, device, clip_max_norm, teacher_forcing_proba):
+def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion, device, clip_max_norm, teacher_forcing_proba, padding_idx):
     model.train() # Enables training mode (includes enabling dropout)
     total_loss = 0
     total_batches = len(loader)
@@ -19,7 +19,15 @@ def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion,
 
         encoder_optimiser.zero_grad()
         decoder_optimiser.zero_grad()
-        predictions = model(encoder_input_batch, decoder_input_batch, teacher_forcing_proba=teacher_forcing_proba) # Forward pass
+        
+        if model.use_attention: # our attention model takes the padding token id
+            predictions = model(encoder_input_batch, decoder_input_batch, 
+                              teacher_forcing_proba=teacher_forcing_proba,
+                              padding_idx=padding_idx)
+        else:
+            predictions = model(encoder_input_batch, decoder_input_batch, 
+                              teacher_forcing_proba=teacher_forcing_proba)
+        
         predictions = predictions.permute(0, 2, 1) # Need to reshape for CrossEntropyLoss, this just reorders dimensions
         loss = criterion(predictions, decoder_target_batch) # Compute loss
         loss.backward() # BPTT
@@ -36,7 +44,7 @@ def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion,
 
     return total_loss / len(loader) # Average loss per batch
 
-def _val_epoch(model, loader, criterion, device):
+def _val_epoch(model, loader, criterion, device, padding_idx):
     model.eval() # Deactivates dropout
     total_loss = 0
     with torch.no_grad(): # Disable gradient computation and tracking
@@ -45,8 +53,15 @@ def _val_epoch(model, loader, criterion, device):
             decoder_input_batch = decoder_input_batch.to(device)
             decoder_target_batch = decoder_target_batch.to(device)
 
-            # During evaluation there should be no teacher forcing
-            predictions = model(encoder_input_batch, decoder_input_batch, teacher_forcing_proba=0.0)
+            # no teacher forcing during evaluation
+            if model.use_attention:
+                predictions = model(encoder_input_batch, decoder_input_batch, 
+                                  teacher_forcing_proba=0.0,
+                                  padding_idx=padding_idx)
+            else:
+                predictions = model(encoder_input_batch, decoder_input_batch, 
+                                  teacher_forcing_proba=0.0)
+            
             predictions = predictions.permute(0, 2, 1)
             loss = criterion(predictions, decoder_target_batch)
             total_loss += loss.item()
@@ -105,13 +120,15 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
             criterion,
             device,
             CLIP_MAX_NORM,
-            TEACHER_FORCING_PROBA
+            TEACHER_FORCING_PROBA,
+            config['PAD_IDX']
         )
         val_loss = _val_epoch(
             model, 
             val_loader, 
             criterion, 
-            device
+            device,
+            config['PAD_IDX']
         )
         bleu = compute_bleu(
             model, 
