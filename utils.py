@@ -8,7 +8,7 @@ import sentencepiece as spm
 
 
 """
-Utility functions used both within the data preprocessing pipeline, and other notebooks prior to model experimentation.
+Utility functions used both within the data preprocessing pipeline, and other notebooks prior to model training.
 """
 
 # == Text Processing ==
@@ -18,43 +18,55 @@ def clean(text):
     Clean and format text.
     """
     # Extract special tokens before lowercasing
-    special_tokens = re.findall(r'<[A-Z0-9]+>', text)
-    # ['<PAD>', '<SOS>', '<EOS>', '<UNK>', '<SEP>', '<S0>', '<S1>']
-    
+    special_tokens = ['<PAD>', '<SOS>', '<EOS>', '<UNK>', '<SEP>', '<S0>', '<S1>', '<URL>', '<IP>', '<PATH>']
+
+    # Entity normalisation
+    text = re.sub(r'http\S+|www\.\S+', '<URL>', text) # URLs: <URL>
+    text = re.sub(r'\b\d{1,3}(\.\d{1,3}){3}\b', '<IP>', text) # IP addresses: <IP>
+    text = re.sub(r'(?<!\w)(/[\w.\-]+){2,}', '<PATH>', text) # File paths: <PATH>
+
     text = text.lower()
-    text = re.sub(r'http\S+', '', text) # URLs
-    text = re.sub(r'\s+', ' ', text) # Whitespace
-    text = re.sub(r'\S+/\S+', '', text) # Filepaths
-    
+    text = re.sub(r'\s+', ' ', text)
+
     # Restore special tokens to uppercase
     for token in special_tokens:
         text = text.replace(token.lower(), token)
-    
+
     return text.strip()
 
-def remove_noise(text):
-    """
-    Removing duplicates / non-conversational messages.
-    """
-    text = text.strip()
+def filter_pair(pair, strict_question_filtering=False):
+    input_text = pair['input']
+    response_text = pair['response']
 
-    if len(text) < 2:
+    # Old remove_noise logic
+    if not strict_question_filtering:
+        invalid_prefixes = ('!', '/', 'http')
+        if any(s.strip().startswith(invalid_prefixes) for s in [input_text, response_text]):
+            return False
+        return True
+
+    # Note this may filter so many samples that using dialogueText_196.csv may be more 
+    # appropriate
+    
+    # Input must be a question
+    if not input_text.strip().endswith('?'):
         return False
-    if text.startswith('!'):   # shell commands
+
+    # Filter social noise responses
+    noise_responses = {'ok', 'okay', 'yes', 'no', 'thanks', 'lol', 'haha', 'np'}
+    if response.strip().lower().rstrip('!.') in noise_responses:
         return False
-    if text.startswith('/'):   # IRC commands
+
+    # Filter responses with mostly placeholder tokens
+    placeholder_stripped = re.sub(r'<\w+>', '', response).strip()
+    if len(placeholder_stripped.split()) < 2:
         return False
-    if text.startswith('http'):
+
+    # Filter multi message collapsed turns from responses
+    if '<SEP>' in response:
         return False
 
     return True
-
-#def tokenise(text):
-    """
-    Split on whitespace.
-    """
-#    return text.split()
-
 
 # Setting up Byte Pair Encoding (BPE) for tokenisation
 # A file will store the rules learned by the tokeniser for splitting text into subword tokens
@@ -66,17 +78,14 @@ if Path(BPE_MODEL_PATH).exists():
     sp.load(BPE_MODEL_PATH)
 
 # This will be our way of accessing the learnt rules above inside the preprocessing pipeline
-def tokenise(text):
-   # return text.split() # Original tokenisation function
+def tokenise(text, use_bpe=True):
     """
     Tokenising text with BPE if available, otherwise falling back to whitespace.
     """
-    if sp is not None:
+    if use_bpe and sp is not None:
         return sp.encode(text, out_type=str)
 
     return text.split()
-
-
 
 def encode_sequence(text, vocab, max_len):
     """
@@ -88,8 +97,6 @@ def encode_sequence(text, vocab, max_len):
     vals = vals + [vocab['<PAD>']] * remaining # Pad to the max length
     
     return vals
-
-
 
 # == Dataset ==
 
@@ -127,8 +134,7 @@ class DialogueDataset(Dataset):
             torch.tensor(decoder_input, dtype=torch.long),
             torch.tensor(decoder_target, dtype=torch.long)
         )
-    
-
+        
 # == Loaders ==
 
 PREPROCESSED_DIR = './data/preprocessed'
