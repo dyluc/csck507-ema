@@ -5,12 +5,11 @@ from pathlib import Path
 import time
 from bleu import compute_bleu
 
-def get_teacher_forcing_proba(epoch, total_epochs, start_proba, end_proba, shift_epochs=0):
+def get_teacher_forcing_proba(epoch, total_epochs, start_proba, end_proba):
     """
-    Start with a simple linear decay from start ratio to end ratio over the total epochs. Shifting can 
-    be used to adjust the epoch at which the end_proba is reached. Can be negative or positive.
+    Start with a simple linear decay from start ratio to end ratio over the total epochs.
     """
-    decay = start_proba - (start_proba - end_proba) * (epoch / (total_epochs - shift_epochs - 1))
+    decay = start_proba - (start_proba - end_proba) * (epoch / (total_epochs - 1))
     return max(decay, end_proba)
 
 def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion, device, clip_max_norm, teacher_forcing_proba, padding_idx):
