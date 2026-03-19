@@ -13,3 +13,11 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+venv/
+models/
+embeddings/
+__pycache__/
+.ipynb_checkpoints/
+*.pt
+*.model
+*.DS_Store
