@@ -34,7 +34,7 @@ def clean(text):
 
     return text.strip()
 
-def filter_pair(pair, strict_question_filtering=False):
+def filter_pair(pair, strict_question_filtering=True):
     input_text = pair['input']
     response_text = pair['response']
 
@@ -54,16 +54,16 @@ def filter_pair(pair, strict_question_filtering=False):
 
     # Filter social noise responses
     noise_responses = {'ok', 'okay', 'yes', 'no', 'thanks', 'lol', 'haha', 'np'}
-    if response.strip().lower().rstrip('!.') in noise_responses:
+    if response_text.strip().lower().rstrip('!.') in noise_responses:
         return False
 
     # Filter responses with mostly placeholder tokens
-    placeholder_stripped = re.sub(r'<\w+>', '', response).strip()
+    placeholder_stripped = re.sub(r'<\w+>', '', response_text).strip()
     if len(placeholder_stripped.split()) < 2:
         return False
 
     # Filter multi message collapsed turns from responses
-    if '<SEP>' in response:
+    if '<SEP>' in response_text:
         return False
 
     return True
