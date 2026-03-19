@@ -123,7 +123,7 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
             epoch=epoch,
             total_epochs=EPOCHS,
             start_proba=TEACHER_FORCING_PROBA,
-            end_proba=0.0
+            end_proba=0.1
         )
         
         train_loss = _train_epoch(
