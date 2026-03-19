@@ -5,6 +5,14 @@ from pathlib import Path
 import time
 from bleu import compute_bleu
 
+def get_teacher_forcing_proba(epoch, total_epochs, start_proba, end_proba, shift_epochs=0):
+    """
+    Start with a simple linear decay from start ratio to end ratio over the total epochs. Shifting can 
+    be used to adjust the epoch at which the end_proba is reached. Can be negative or positive.
+    """
+    decay = start_proba - (start_proba - end_proba) * (epoch / (total_epochs - shift_epochs - 1))
+    return max(decay, end_proba)
+
 def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion, device, clip_max_norm, teacher_forcing_proba, padding_idx):
     model.train() # Enables training mode (includes enabling dropout)
     total_loss = 0
@@ -74,7 +82,7 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
     # Training parameters
     EPOCHS = hyperparams['EPOCHS']
     CLIP_MAX_NORM = hyperparams['CLIP_MAX_NORM']
-    TEACHER_FORCING_PROBA = hyperparams['TEACHER_FORCING_PROBA']
+    TEACHER_FORCING_PROBA = hyperparams['TEACHER_FORCING_PROBA'] # Now the starting proba
     ENCODER_LEARNING_RATE = hyperparams['ENCODER_LEARNING_RATE']
     DECODER_LEARNING_RATE = hyperparams['DECODER_LEARNING_RATE']
     
@@ -111,6 +119,13 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
     epoch_times = []
     for epoch in range(start_epoch, EPOCHS):
         start = time.time()
+
+        current_epoch_tf_proba = get_teacher_forcing_proba(
+            epoch=epoch,
+            total_epochs=EPOCHS,
+            start_proba=TEACHER_FORCING_PROBA,
+            end_proba=0.0
+        )
         
         train_loss = _train_epoch(
             model, 
@@ -120,7 +135,7 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
             criterion,
             device,
             CLIP_MAX_NORM,
-            TEACHER_FORCING_PROBA,
+            current_epoch_tf_proba,
             config['PAD_IDX']
         )
         val_loss = _val_epoch(
