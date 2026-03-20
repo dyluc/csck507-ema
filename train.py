@@ -16,7 +16,7 @@ def _train_epoch(model, loader, encoder_optimiser, decoder_optimiser, criterion,
     model.train() # Enables training mode (includes enabling dropout)
     total_loss = 0
     total_batches = len(loader)
-    log_interval = max(1, int(total_batches * 0.05)) # Every 5%
+    log_interval = max(1, int(total_batches * 0.25)) # Every 25%
 
     for batch_idx, (encoder_input_batch, decoder_input_batch, decoder_target_batch) in enumerate(loader):
         # Remember tensors and models must be on the same device
@@ -81,7 +81,9 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
     # Training parameters
     EPOCHS = hyperparams['EPOCHS']
     CLIP_MAX_NORM = hyperparams['CLIP_MAX_NORM']
-    TEACHER_FORCING_PROBA = hyperparams['TEACHER_FORCING_PROBA'] # Now the starting proba
+    START_TEACHER_FORCING_PROBA = hyperparams['START_TEACHER_FORCING_PROBA']
+    END_TEACHER_FORCING_PROBA = hyperparams['END_TEACHER_FORCING_PROBA']
+    DELAY_TEACHER_FORCING_EPOCHS = hyperparams['DELAY_TEACHER_FORCING_EPOCHS']
     ENCODER_LEARNING_RATE = hyperparams['ENCODER_LEARNING_RATE']
     DECODER_LEARNING_RATE = hyperparams['DECODER_LEARNING_RATE']
     
@@ -119,12 +121,17 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
     for epoch in range(start_epoch, EPOCHS):
         start = time.time()
 
-        current_epoch_tf_proba = get_teacher_forcing_proba(
-            epoch=epoch,
-            total_epochs=EPOCHS,
-            start_proba=TEACHER_FORCING_PROBA,
-            end_proba=0.1
-        )
+        # Model must learn basic patterns, so keep teacher forcing for specific number of epochs
+        if epoch < DELAY_TEACHER_FORCING_EPOCHS:
+            current_epoch_tf_proba = 1.0
+        else:
+            # Begin decaying
+            current_epoch_tf_proba = get_teacher_forcing_proba(
+                epoch=epoch - DELAY_TEACHER_FORCING_EPOCHS,
+                total_epochs=EPOCHS - DELAY_TEACHER_FORCING_EPOCHS,
+                start_proba=START_TEACHER_FORCING_PROBA,
+                end_proba=END_TEACHER_FORCING_PROBA
+            )
         
         train_loss = _train_epoch(
             model, 
@@ -162,6 +169,10 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
             'encoder_optimiser_state_dict': encoder_optimiser.state_dict(),
             'decoder_optimiser_state_dict': decoder_optimiser.state_dict(),
         }, checkpoint_dir / f'checkpoint_epoch_{epoch+1}.pt')
+
+        if (epoch + 1) % 30 == 0:
+            # Save a model for testing with inference.py
+            torch.save(model, checkpoint_dir / f'checkpoint_epoch_{epoch+1}_test.pt')
     
     # Save full model
     torch.save(model, model_path)
