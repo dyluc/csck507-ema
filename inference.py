@@ -16,8 +16,10 @@ def generate_response(model, text, vocab, vocab_reversed, config, device, max_le
         next_token = torch.tensor([config['SOS_IDX']], dtype=torch.long).to(device)
         tokens = []
 
+        encoder_mask = (encoder_input != config['PAD_IDX'])
+
         for _ in range(max_len):
-            pred, hidden = model.decoder(next_token, hidden, encoder_outputs)
+            pred, hidden = model.decoder(next_token, hidden, encoder_outputs, encoder_mask)
             scaled = pred / temperature
 
             # This is an inference time penalty we can apply to the model
@@ -32,6 +34,7 @@ def generate_response(model, text, vocab, vocab_reversed, config, device, max_le
                 break
 
             token_str = vocab_reversed[str(next_token.item())]
+            print(f"Generated: {token_str} (id={next_token.item()})")  # DEBUG
             if token_str not in SKIP_TOKENS:
                 tokens.append(token_str)
 
@@ -61,7 +64,7 @@ def main():
     print('Type message or "exit" to exit\n')
 
     while True:
-        text = input('You: ').strip()
+        text = input('Input: ').strip()
         if text.lower() == 'exit':
             break
         if not text:
@@ -78,7 +81,7 @@ def main():
             temperature=args.temperature,
             top_k=args.top_k
         )
-        print(response)
+        print(f'Response: {response}')
 
 if __name__ == '__main__':
     main()
