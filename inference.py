@@ -13,13 +13,18 @@ def generate_response(model, text, vocab, vocab_reversed, config, device, max_le
 
     with torch.no_grad():
         encoder_outputs, hidden = model.encoder(encoder_input)
+        if not model.use_attention and hidden.size(0) == 1:
+            hidden = hidden.repeat(2, 1, 1)
         next_token = torch.tensor([config['SOS_IDX']], dtype=torch.long).to(device)
         tokens = []
-
-        encoder_mask = (encoder_input != config['PAD_IDX'])
+        
+        encoder_mask = (encoder_input != config['PAD_IDX']) if model.use_attention else None
 
         for _ in range(max_len):
-            pred, hidden = model.decoder(next_token, hidden, encoder_outputs, encoder_mask)
+            if model.use_attention:
+                pred, hidden = model.decoder(next_token, hidden, encoder_outputs, encoder_mask)
+            else:
+                pred, hidden = model.decoder(next_token, hidden)
             scaled = pred / temperature
 
             # This is an inference time penalty we can apply to the model
