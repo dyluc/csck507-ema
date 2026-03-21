@@ -123,7 +123,7 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
 
         # Model must learn basic patterns, so keep teacher forcing for specific number of epochs
         if epoch < DELAY_TEACHER_FORCING_EPOCHS:
-            current_epoch_tf_proba = 1.0
+            current_epoch_tf_proba = START_TEACHER_FORCING_PROBA
         else:
             # Begin decaying
             current_epoch_tf_proba = get_teacher_forcing_proba(
@@ -164,13 +164,14 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
         print(f'Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val BLEU: {bleu:.4f} | Time: {elapsed:.2f}s')
     
         # Checkpoint the state dict (smaller file size, doesn't preserve architecture)
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'encoder_optimiser_state_dict': encoder_optimiser.state_dict(),
-            'decoder_optimiser_state_dict': decoder_optimiser.state_dict(),
-        }, checkpoint_dir / f'checkpoint_epoch_{epoch+1}.pt')
+        if (epoch + 1) % 2 == 0:
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'encoder_optimiser_state_dict': encoder_optimiser.state_dict(),
+                'decoder_optimiser_state_dict': decoder_optimiser.state_dict(),
+            }, checkpoint_dir / f'checkpoint_epoch_{epoch+1}.pt')
 
-        if (epoch + 1) % 30 == 0:
+        if (epoch + 1) % 2 == 0:
             # Save a model for testing with inference.py
             torch.save(model, checkpoint_dir / f'checkpoint_epoch_{epoch+1}_test.pt')
     

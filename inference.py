@@ -2,9 +2,9 @@ import torch
 import argparse
 from utils import encode_sequence, clean, load_vocab, load_config
 
-SKIP_TOKENS = {'<SEP>', '<S0>', '<S1>', '<UNK>'}
+SKIP_TOKENS = {'<SEP>', '<S0>', '<S1>'}
 
-def generate_response(model, text, vocab, vocab_reversed, config, device, max_len=30, temperature=1.0, top_k=5):
+def generate_response(model, text, vocab, vocab_reversed, config, device, max_len=30, temperature=1.0, top_k=5, repetition_penalty=1.0):
     model.eval()
     encoder_input = torch.tensor(
         encode_sequence(clean(text), vocab, config['MAX_LENGTH']),
@@ -24,7 +24,7 @@ def generate_response(model, text, vocab, vocab_reversed, config, device, max_le
 
             # This is an inference time penalty we can apply to the model
             for token_id in set([vocab[t] for t in tokens if t in vocab]):
-                scaled[0][token_id] -= 1.5
+                scaled[0][token_id] -= repetition_penalty
 
             top_k_values, top_k_indices = torch.topk(scaled, top_k, dim=-1)
             probs = torch.softmax(top_k_values, dim=-1)
@@ -34,7 +34,6 @@ def generate_response(model, text, vocab, vocab_reversed, config, device, max_le
                 break
 
             token_str = vocab_reversed[str(next_token.item())]
-            print(f"Generated: {token_str} (id={next_token.item()})")  # DEBUG
             if token_str not in SKIP_TOKENS:
                 tokens.append(token_str)
 
@@ -47,6 +46,7 @@ def main():
     parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature')
     parser.add_argument('--top_k', type=int, default=5, help='Top-k sampling')
     parser.add_argument('--max_len', type=int, default=30, help='Max response length')
+    parser.add_argument('--repetition_penalty', type=float, default=1.5, help='Repetition penalty')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
