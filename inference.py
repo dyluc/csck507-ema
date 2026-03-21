@@ -44,9 +44,9 @@ def main():
     parser = argparse.ArgumentParser(description='Inference script for seq2seq model')
     parser.add_argument('--model', type=str, required=True, help='Path to saved model file')
     parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature')
-    parser.add_argument('--top_k', type=int, default=5, help='Top-k sampling')
+    parser.add_argument('--top_k', type=int, default=1, help='Top-k sampling')
     parser.add_argument('--max_len', type=int, default=30, help='Max response length')
-    parser.add_argument('--repetition_penalty', type=float, default=1.5, help='Repetition penalty')
+    parser.add_argument('--repetition_penalty', type=float, default=1.0, help='Repetition penalty')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')

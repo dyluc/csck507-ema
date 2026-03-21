@@ -161,19 +161,14 @@ def train(model, train_loader, val_loader, vocab_reversed, config, device, check
         elapsed = time.time() - start
         epoch_times.append(elapsed)
         
-        print(f'Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val BLEU: {bleu:.4f} | Time: {elapsed:.2f}s')
+        print(f'Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val BLEU: {bleu:.4f} | TF: {current_epoch_tf_proba} | Time: {elapsed:.2f}s')
     
         # Checkpoint the state dict (smaller file size, doesn't preserve architecture)
-        if (epoch + 1) % 2 == 0:
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'encoder_optimiser_state_dict': encoder_optimiser.state_dict(),
-                'decoder_optimiser_state_dict': decoder_optimiser.state_dict(),
-            }, checkpoint_dir / f'checkpoint_epoch_{epoch+1}.pt')
-
-        if (epoch + 1) % 2 == 0:
-            # Save a model for testing with inference.py
-            torch.save(model, checkpoint_dir / f'checkpoint_epoch_{epoch+1}_test.pt')
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'encoder_optimiser_state_dict': encoder_optimiser.state_dict(),
+            'decoder_optimiser_state_dict': decoder_optimiser.state_dict(),
+        }, checkpoint_dir / f'checkpoint_epoch_{epoch+1}.pt')
     
     # Save full model
     torch.save(model, model_path)
