@@ -6,11 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import sentencepiece as spm
 
-
-"""
-Utility functions used both within the data preprocessing pipeline, and other notebooks prior to model training.
-"""
-
 # == Text Processing ==
 
 def clean(text):
