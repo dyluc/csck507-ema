@@ -1,262 +1,105 @@
 import re
-import json
-import os
-from pathlib import Path
-from collections import Counter
-
-import torch
 import pandas as pd
+import json
+import torch
 from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import sentencepiece as spm
 
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace
-
-
-"""
-Utility functions for preprocessing + model training
-Supports BOTH:
-1) Word-level tokenizer (legacy)
-2) BPE tokenizer (recommended)
-"""
-
-# ==============================================================================
-# == Constants ==
-# ==============================================================================
-
-PREPROCESSED_DIR = './data/preprocessed'
-BPE_DIR = './data/bpe'
-
-# Keep all conversation structure + entity tokens as specials
-BASE_SPECIAL_TOKENS = ['<PAD>', '<SOS>',
-                       '<EOS>', '<UNK>', '<SEP>', '<S0>', '<S1>']
-ENTITY_TOKENS = ['<url>', '<path>', '<ip>',
-                 '<user>', '<version>', '<email>', '<cmd>']
-SPECIAL_TOKENS = BASE_SPECIAL_TOKENS + ENTITY_TOKENS
-
-# ==============================================================================
 # == Text Processing ==
-# ==============================================================================
 
-_ENTITY_PATTERNS = [
-    # 1) URLs first
-    (re.compile(r'https?://\S+|ftp://\S+|www\.\S+', re.IGNORECASE), '<url>'),
-
-    # 2) Email
-    (re.compile(r'\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b', re.IGNORECASE), '<email>'),
-
-    # 3) IPv4
-    (re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b'), '<ip>'),
-
-    # 4) Windows path
-    (re.compile(r'[A-Za-z]:\\(?:[\w\s.\-]+\\)*[\w\s.\-]*'), '<path>'),
-
-    # 5) Unix path (2+ segments)
-    (re.compile(r'(?:~|\.{1,2})?/[\w.\-@+]+(?:/[\w.\-@+]*)+'), '<path>'),
-
-    # 6) Version
-    (re.compile(r'\bv?\d+\.\d+(?:\.\d+)*\b', re.IGNORECASE), '<version>'),
-
-    # 7) IRC username style <john_doe>, avoid known tokens
-    (re.compile(
-        r'<(?!(?:pad|sos|eos|unk|sep|s0|s1|url|path|ip|user|version|email|cmd)>)'
-        r'[a-zA-Z_][a-zA-Z0-9_\-]{1,30}>'
-    ), '<user>'),
-
-    # 8) Common commands
-    (re.compile(r'\b(?:apt-get|apt|dpkg|sudo|chmod|chown|grep|awk|sed|wget|curl|pip3?|python3?)\b', re.IGNORECASE), '<cmd>'),
-]
-
-
-def clean(text: str) -> str:
+def clean(text):
     """
-    Normalize noisy entities while preserving conversation structure tokens.
+    Clean and format text.
     """
-    text = str(text)
+    # Extract special tokens before lowercasing
+    special_tokens = ['<PAD>', '<SOS>', '<EOS>', '<UNK>', '<SEP>', '<S0>', '<S1>', '<URL>', '<IP>', '<PATH>']
 
-    # Entity normalization first
-    for pattern, token in _ENTITY_PATTERNS:
-        text = pattern.sub(token, text)
+    # Entity normalisation
+    text = re.sub(r'http\S+|www\.\S+', '<URL>', text) # URLs: <URL>
+    text = re.sub(r'\b\d{1,3}(\.\d{1,3}){3}\b', '<IP>', text) # IP addresses: <IP>
+    text = re.sub(r'(?<!\w)(/[\w.\-]+){2,}', '<PATH>', text) # File paths: <PATH>
 
-    # Lowercase
     text = text.lower()
+    text = re.sub(r'\s+', ' ', text)
 
-    # Remove residual tags BUT keep all special tokens
-    # preserved tokens: <pad><sos><eos><unk><sep><s0><s1><url><path><ip><user><version><email><cmd>
-    text = re.sub(
-        r'<(?!/?(?:pad|sos|eos|unk|sep|s0|s1|url|path|ip|user|version|email|cmd)>)[^>]+>',
-        '',
-        text
-    )
+    # Restore special tokens to uppercase
+    for token in special_tokens:
+        text = text.replace(token.lower(), token)
 
-    # normalize whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return text.strip()
 
+def filter_pair(pair, strict_question_filtering=True):
+    input_text = pair['input']
+    response_text = pair['response']
 
-def remove_noise(text: str) -> bool:
-    """
-    Filter obvious non-conversational lines.
-    """
-    text = str(text).strip()
-    if len(text) < 2:
+    # Old remove_noise logic
+    if not strict_question_filtering:
+        invalid_prefixes = ('!', '/', 'http')
+        if any(s.strip().startswith(invalid_prefixes) for s in [input_text, response_text]):
+            return False
+        return True
+
+    # Note this may filter so many samples that using dialogueText_196.csv may be more 
+    # appropriate
+    
+    # Input must be a question
+    if not input_text.strip().endswith('?'):
         return False
-    if text.startswith('!'):
+
+    # Filter social noise responses
+    noise_responses = {'ok', 'okay', 'yes', 'no', 'thanks', 'lol', 'haha', 'np'}
+    if response_text.strip().lower().rstrip('!.') in noise_responses:
         return False
-    if text.startswith('/'):
+
+    # Filter responses with mostly placeholder tokens
+    placeholder_stripped = re.sub(r'<\w+>', '', response_text).strip()
+    if len(placeholder_stripped.split()) < 2:
         return False
-    # raw url line
-    if text.startswith('http'):
+
+    # Filter multi message collapsed turns from responses
+    if '<SEP>' in response_text:
         return False
+
     return True
 
+# Setting up Byte Pair Encoding (BPE) for tokenisation
+# A file will store the rules learned by the tokeniser for splitting text into subword tokens
+BPE_MODEL_PATH = "./data/preprocessed/bpe.model"
 
-def tokenise(text, bpe=None):
-    if bpe is not None:
-        return bpe.tokenise(text)
-    return str(text).split()
+sp = None
+if Path(BPE_MODEL_PATH).exists():
+    sp = spm.SentencePieceProcessor()
+    sp.load(BPE_MODEL_PATH)
 
-
-def encode_sequence(text, vocab, max_len, bpe=None):
-    if bpe is not None:
-        return bpe.encode_sequence(text, max_len)
-
-    tokens = tokenise(text)[:max_len]
-    vals = [vocab.get(t, vocab['<UNK>']) for t in tokens]
-    return vals + [vocab['<PAD>']] * (max_len - len(vals))
-
-
-# ==============================================================================
-# == Word-level vocab helpers ==
-# ==============================================================================
-
-def build_word_vocab(train_df: pd.DataFrame, min_token_freq: int = 5):
+# This will be our way of accessing the learnt rules above inside the preprocessing pipeline
+def tokenise(text, use_bpe=True):
     """
-    Build legacy word-level vocab from train split only.
+    Tokenising text with BPE if available, otherwise falling back to whitespace.
     """
-    counter = Counter()
-    for text in train_df['input']:
-        counter.update(tokenise(text))
-    for text in train_df['response']:
-        counter.update(tokenise(text))
+    if use_bpe and sp is not None:
+        return sp.encode(text, out_type=str)
 
-    vocab = {tok: i for i, tok in enumerate(SPECIAL_TOKENS)}
-    for word, count in counter.items():
-        if count >= min_token_freq and word not in vocab:
-            vocab[word] = len(vocab)
+    return text.split()
 
-    vocab_reversed = {idx: word for word, idx in vocab.items()}
-    return vocab, vocab_reversed, counter
-
-
-# ==============================================================================
-# == BPE ==
-# ==============================================================================
-
-def train_bpe(train_csv_path, output_dir=BPE_DIR, vocab_size=16000, min_frequency=2):
+def encode_sequence(text, vocab, max_len):
     """
-    Train BPE tokenizer from train.csv (input + response columns).
+    Encode text into id sequences using the provided vocab dictionary. Truncate and pad.
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    tokens = tokenise(text)[:max_len] # Truncate to maximum sequence length
+    vals = [vocab.get(t, vocab['<UNK>']) for t in tokens] # Get token, or default to <UNK>
+    remaining = max_len - len(vals)
+    vals = vals + [vocab['<PAD>']] * remaining # Pad to the max length
+    
+    return vals
 
-    df = pd.read_csv(train_csv_path)
-    if 'input' not in df.columns or 'response' not in df.columns:
-        raise ValueError(
-            "train.csv must contain 'input' and 'response' columns")
-
-    corpus_path = os.path.join(output_dir, '_corpus_tmp.txt')
-    with open(corpus_path, 'w', encoding='utf-8') as f:
-        for _, row in df.iterrows():
-            f.write(str(row['input']) + '\n')
-            f.write(str(row['response']) + '\n')
-
-    tokenizer = Tokenizer(BPE(unk_token='<UNK>'))
-    tokenizer.pre_tokenizer = Whitespace()
-
-    trainer = BpeTrainer(
-        vocab_size=vocab_size,
-        min_frequency=min_frequency,
-        special_tokens=SPECIAL_TOKENS,
-        show_progress=True
-    )
-
-    tokenizer.train(files=[corpus_path], trainer=trainer)
-    os.remove(corpus_path)
-
-    tokenizer_path = os.path.join(output_dir, 'bpe_tokenizer.json')
-    tokenizer.save(tokenizer_path)
-
-    vocab = tokenizer.get_vocab()
-    with open(os.path.join(output_dir, 'vocab_bpe.json'), 'w', encoding='utf-8') as f:
-        json.dump(vocab, f, ensure_ascii=False, indent=2)
-
-    with open(os.path.join(output_dir, 'vocab_bpe_reversed.json'), 'w', encoding='utf-8') as f:
-        json.dump({str(v): k for k, v in vocab.items()},
-                  f, ensure_ascii=False, indent=2)
-
-    return load_bpe(output_dir)
-
-
-def load_bpe(bpe_dir=BPE_DIR):
-    return BPETokenizer(os.path.join(bpe_dir, 'bpe_tokenizer.json'))
-
-
-class BPETokenizer:
-    def __init__(self, tokenizer_path):
-        if not os.path.exists(tokenizer_path):
-            raise FileNotFoundError(
-                f"BPE tokenizer not found: {tokenizer_path}\n"
-                f"Run train_bpe('./data/preprocessed/train.csv') first."
-            )
-        self._tok = Tokenizer.from_file(tokenizer_path)
-        self.vocab = self._tok.get_vocab()
-
-        self.pad_id = self.vocab['<PAD>']
-        self.sos_id = self.vocab['<SOS>']
-        self.eos_id = self.vocab['<EOS>']
-        self.unk_id = self.vocab['<UNK>']
-        self.sep_id = self.vocab['<SEP>']
-        self.s0_id = self.vocab['<S0>']
-        self.s1_id = self.vocab['<S1>']
-
-    def get_vocab_size(self):
-        return self._tok.get_vocab_size()
-
-    def tokenise(self, text):
-        return self._tok.encode(str(text), add_special_tokens=False).tokens
-
-    def encode_sequence(self, text, max_len):
-        ids = self._tok.encode(
-            str(text), add_special_tokens=False).ids[:max_len]
-        return ids + [self.pad_id] * (max_len - len(ids))
-
-    def encode_with_sos(self, text, max_len):
-        ids = self._tok.encode(
-            str(text), add_special_tokens=False).ids[:max_len - 1]
-        ids = [self.sos_id] + ids
-        return ids + [self.pad_id] * (max_len - len(ids))
-
-    def encode_with_eos(self, text, max_len):
-        ids = self._tok.encode(
-            str(text), add_special_tokens=False).ids[:max_len - 1]
-        ids = ids + [self.eos_id]
-        return ids + [self.pad_id] * (max_len - len(ids))
-
-    def decode(self, ids, skip_special_tokens=True):
-        return self._tok.decode(ids, skip_special_tokens=skip_special_tokens)
-
-
-# ==============================================================================
-# == Dataset / Dataloader ==
-# ==============================================================================
+# == Dataset ==
 
 class DialogueDataset(Dataset):
-    def __init__(self, pairs: pd.DataFrame, vocab, max_len: int, bpe=None):
-        self.pairs = pairs.reset_index(drop=True)
+    def __init__(self, pairs, vocab, max_len):
+        self.pairs = pairs.reset_index(drop=True) # pairs is a DataFrame
         self.vocab = vocab
         self.max_len = max_len
-        self.bpe = bpe
 
     def __len__(self):
         return len(self.pairs)
@@ -265,66 +108,58 @@ class DialogueDataset(Dataset):
         input_text = self.pairs.loc[idx, 'input']
         response_text = self.pairs.loc[idx, 'response']
 
-        if self.bpe is not None:
-            encoder_input = self.bpe.encode_sequence(input_text, self.max_len)
-            decoder_input = self.bpe.encode_with_sos(
-                response_text, self.max_len)
-            decoder_target = self.bpe.encode_with_eos(
-                response_text, self.max_len)
-        else:
-            encoder_input = encode_sequence(
-                input_text, self.vocab, self.max_len)
+        # encoder_input: Encoded input sequence (for the encoder)
+        encoder_input = encode_sequence(input_text, self.vocab, self.max_len)
 
-            response_tokens = tokenise(response_text)[:self.max_len - 1]
-            encoded_response = [self.vocab.get(
-                t, self.vocab['<UNK>']) for t in response_tokens]
+        # Encoded response (used to construct decoder input and target)
+        response_tokens = tokenise(response_text)[:self.max_len - 1] # Chop off a token to replace with either SOS or EOS
+        encoded_response = [self.vocab.get(t, self.vocab['<UNK>']) for t in response_tokens]
 
-            decoder_input = [self.vocab['<SOS>']] + encoded_response
-            decoder_target = encoded_response + [self.vocab['<EOS>']]
+        # decoder_input: Encoded response with <SOS> prepended (pad to the max length)
+        decoder_input = [self.vocab['<SOS>']] + encoded_response
+        remaining = self.max_len - len(decoder_input)
+        decoder_input = decoder_input + [self.vocab['<PAD>']] * remaining
 
-            remaining = self.max_len - len(decoder_input)
-            decoder_input = decoder_input + [self.vocab['<PAD>']] * remaining
-            decoder_target = decoder_target + [self.vocab['<PAD>']] * remaining
+        # decoder_target: Encoded response with <EOS> appended (pad to the max length)
+        decoder_target = encoded_response + [self.vocab['<EOS>']]
+        decoder_target = decoder_target + [self.vocab['<PAD>']] * remaining
 
         return (
             torch.tensor(encoder_input, dtype=torch.long),
             torch.tensor(decoder_input, dtype=torch.long),
             torch.tensor(decoder_target, dtype=torch.long)
         )
+        
+# == Loaders ==
 
+PREPROCESSED_DIR = './data/preprocessed'
 
-def get_dataloaders(train_set, val_set, test_set, vocab, max_length, batch_size, bpe=None, num_workers=0):
-    train_dataset = DialogueDataset(train_set, vocab, max_length, bpe)
-    val_dataset = DialogueDataset(val_set, vocab, max_length, bpe)
-    test_dataset = DialogueDataset(test_set, vocab, max_length, bpe)
+def load_sets():
+    train_set = pd.read_csv(f'{PREPROCESSED_DIR}/train.csv')
+    val_set = pd.read_csv(f'{PREPROCESSED_DIR}/val.csv')
+    test_set = pd.read_csv(f'{PREPROCESSED_DIR}/test.csv')
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-
-    return train_loader, val_loader, test_loader
-
-
-# ==============================================================================
-# == IO helpers ==
-# ==============================================================================
-
-def load_sets(preprocessed_dir=PREPROCESSED_DIR):
-    train_set = pd.read_csv(f'{preprocessed_dir}/train.csv')
-    val_set = pd.read_csv(f'{preprocessed_dir}/val.csv')
-    test_set = pd.read_csv(f'{preprocessed_dir}/test.csv')
     return train_set, val_set, test_set
 
-
-def load_vocab(rev=False, preprocessed_dir=PREPROCESSED_DIR, name='vocab'):
-    filename = f'{name}_reversed' if rev else name
-    with open(f'{preprocessed_dir}/{filename}.json', 'r', encoding='utf-8') as f:
+def load_vocab(rev=False):
+    filename = 'vocab_reversed' if rev else 'vocab'
+    with open(f'{PREPROCESSED_DIR}/{filename}.json', 'r') as f:
         return json.load(f)
 
-
-def load_config(preprocessed_dir=PREPROCESSED_DIR):
-    with open(f'{preprocessed_dir}/config.json', 'r', encoding='utf-8') as f:
+def load_config():
+    with open(f'{PREPROCESSED_DIR}/config.json', 'r') as f:
         return json.load(f)
+
+def get_dataloaders(train_set, val_set, test_set, vocab, max_length, batch_size):
+    
+    # Lets create our PyTorch Datasets and DataLoaders!
+    train_dataset = DialogueDataset(train_set, vocab, max_length)
+    val_dataset = DialogueDataset(val_set, vocab, max_length)
+    test_dataset = DialogueDataset(test_set, vocab, max_length)
+
+    # Shuffle to ensure all batches get a good representation of samples
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader, test_loader
