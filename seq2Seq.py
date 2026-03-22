@@ -9,7 +9,7 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.device = device
 
-    def forward(self, encoder_input, decoder_input, teacher_forcing_proba=0.5):
+    def forward(self, encoder_input, decoder_input, teacher_forcing_proba=0.5, padding_idx = None):
         # encoder_input: [batch_size, encoder_input_length]
         # decoder_input: [batch_size, decoder_input_length]
         
@@ -23,6 +23,7 @@ class Seq2Seq(nn.Module):
         if self.use_attention:
             # Forward pass through the encoder to obtain the final hidden state as well as encoder outputs at each timestep
             encoder_outputs, hidden = self.encoder(encoder_input)
+            encoder_mask = (encoder_input != padding_idx)
         else:
             # Forward pass through the encoder to obtain the final hidden state
             hidden = self.encoder(encoder_input)
@@ -33,7 +34,7 @@ class Seq2Seq(nn.Module):
         # Every timestep: every token in the sequence, produce a prediction
         for timestep in range(1, decoder_input_length):
             if self.use_attention:
-                pred, hidden = self.decoder(next_decoder_input, hidden, encoder_outputs)
+                pred, hidden = self.decoder(next_decoder_input, hidden, encoder_outputs, encoder_mask)
             else:
                 pred, hidden = self.decoder(next_decoder_input, hidden) # Use the next decoder input and last hidden state to produce the next token prediction
             

@@ -5,3 +5,8 @@ kaggle
 pandas
 matplotlib
 scikit-learn
+sentencepiece
+nltk
+gensim
+sentencepiece
+
