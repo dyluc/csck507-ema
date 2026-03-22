@@ -1,5 +1,9 @@
 # CSCK507 End of Module Assignment - Generative ChatBot
 
+<div align="center">
+  <img src="chatbot_terminal.png" width="400" alt="Ubuntu ChatBot">
+</div>
+
 ## Project structure
 ```
 ├── bleu.py                    # BLEU score utilities for model evaluation
